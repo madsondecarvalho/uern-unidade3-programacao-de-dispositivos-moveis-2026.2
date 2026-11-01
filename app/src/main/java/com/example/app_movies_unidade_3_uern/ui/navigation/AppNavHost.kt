@@ -1,5 +1,10 @@
 package com.example.app_movies_unidade_3_uern.ui.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -13,10 +18,14 @@ import com.example.app_movies_unidade_3_uern.ui.screens.FavoritesScreen
 import com.example.app_movies_unidade_3_uern.ui.screens.HomeScreen
 import com.example.app_movies_unidade_3_uern.ui.screens.MovieDetailsScreen
 import com.example.app_movies_unidade_3_uern.ui.screens.MovieListScreen
+import com.example.app_movies_unidade_3_uern.ui.screens.ReviewsScreen
 import com.example.app_movies_unidade_3_uern.ui.viewmodel.DetailsViewModel
 import com.example.app_movies_unidade_3_uern.ui.viewmodel.FavoritesViewModel
 import com.example.app_movies_unidade_3_uern.ui.viewmodel.HomeViewModel
+import com.example.app_movies_unidade_3_uern.ui.viewmodel.ReviewsViewModel
 import com.example.app_movies_unidade_3_uern.ui.viewmodel.ViewModelFactory
+
+private const val TRANSITION_DURATION = 350
 
 @Composable
 fun AppNavHost(
@@ -27,7 +36,32 @@ fun AppNavHost(
     NavHost(
         navController = navController,
         startDestination = Screen.Home.route,
-        modifier = modifier
+        modifier = modifier,
+        // Transições nativas suaves de navegação com slide horizontal e fade
+        enterTransition = {
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Left,
+                animationSpec = tween(TRANSITION_DURATION, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(TRANSITION_DURATION))
+        },
+        exitTransition = {
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Left,
+                animationSpec = tween(TRANSITION_DURATION, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(TRANSITION_DURATION))
+        },
+        popEnterTransition = {
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Right,
+                animationSpec = tween(TRANSITION_DURATION, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(TRANSITION_DURATION))
+        },
+        popExitTransition = {
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Right,
+                animationSpec = tween(TRANSITION_DURATION, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(TRANSITION_DURATION))
+        }
     ) {
         // Rota: Home
         composable(Screen.Home.route) {
@@ -37,6 +71,9 @@ fun AppNavHost(
                 },
                 onNavigateToFavorites = {
                     navController.navigate(Screen.Favorites.route)
+                },
+                onNavigateToReviews = {
+                    navController.navigate(Screen.Reviews.route)
                 }
             )
         }
@@ -65,7 +102,8 @@ fun AppNavHost(
             MovieDetailsScreen(
                 movieId = movieId,
                 viewModel = detailsViewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReviews = { navController.navigate(Screen.Reviews.route) }
             )
         }
 
@@ -77,6 +115,24 @@ fun AppNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onMovieClick = { movieId ->
                     navController.navigate(Screen.MovieDetails.createRoute(movieId))
+                },
+                onExploreMovies = {
+                    navController.navigate(Screen.MovieList.route)
+                }
+            )
+        }
+
+        // Rota: Minhas Avaliações (SQLite)
+        composable(Screen.Reviews.route) {
+            val reviewsViewModel: ReviewsViewModel = viewModel(factory = viewModelFactory)
+            ReviewsScreen(
+                viewModel = reviewsViewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onMovieClick = { movieId ->
+                    navController.navigate(Screen.MovieDetails.createRoute(movieId))
+                },
+                onExploreMovies = {
+                    navController.navigate(Screen.MovieList.route)
                 }
             )
         }

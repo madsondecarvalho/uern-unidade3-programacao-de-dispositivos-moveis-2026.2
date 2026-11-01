@@ -1,6 +1,5 @@
 package com.example.app_movies_unidade_3_uern.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -12,32 +11,54 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = CinemaBlueDark,
+    onPrimary = BackgroundDark,
+    primaryContainer = CinemaBlueContainerDark,
+    onPrimaryContainer = TextPrimaryDark,
+    secondary = AmberTextDark,
+    onSecondary = BackgroundDark,
+    tertiary = CinemaRubyLight,
+    background = BackgroundDark,
+    onBackground = TextPrimaryDark,
+    surface = SurfaceDark,
+    onSurface = TextPrimaryDark,
+    surfaceVariant = SurfaceVariantDark,
+    onSurfaceVariant = TextSecondaryDark,
+    surfaceContainer = SurfaceContainerDark,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
+    outline = CinemaBlueDark.copy(alpha = 0.4f),
+    outlineVariant = SurfaceVariantDark,
+    error = CinemaRubyLight,
+    errorContainer = CinemaRubyContainerDark
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    primary = CinemaBlue,
+    onPrimary = SurfaceLight,
+    primaryContainer = CinemaBlueContainerLight,
+    onPrimaryContainer = TextPrimaryLight,
+    secondary = AmberTextLight,
+    onSecondary = SurfaceLight,
+    tertiary = CinemaRuby,
+    background = BackgroundLight,
+    onBackground = TextPrimaryLight,
+    surface = SurfaceLight,
+    onSurface = TextPrimaryLight,
+    surfaceVariant = SurfaceVariantLight,
+    onSurfaceVariant = TextSecondaryLight,
+    surfaceContainer = SurfaceContainerLight,
+    surfaceContainerHighest = SurfaceContainerHighestLight,
+    outline = CinemaBlue.copy(alpha = 0.35f),
+    outlineVariant = SurfaceVariantLight,
+    error = CinemaRuby,
+    errorContainer = CinemaRubyContainerLight
 )
 
 @Composable
 fun Appmoviesunidade3uernTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    // dynamicColor desativado para garantir a coerência da paleta cinematográfica personalizada
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -45,7 +66,6 @@ fun Appmoviesunidade3uernTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }

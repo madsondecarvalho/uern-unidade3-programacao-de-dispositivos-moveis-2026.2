@@ -1,25 +1,61 @@
-# 💾 Estratégia de Cache e Persistência Local
+# 💾 Arquitetura Offline-First e Persistência Local (SQLite / Room)
 
-Este documento descreve detalhadamente o funcionamento da camada de persistência com o **Room**, a política de cache de 24 horas e a resolução técnica do desafio de integridade entre dados remotos e dados do usuário (*Favoritos*).
-
----
-
-## 1. O Desafio Arquitetural
-
-No aplicativo, precisávamos atender a dois requisitos simultâneos com uma **única tabela**:
-1. **Cache de 1 dia para detalhes**: Reduzir chamadas desnecessárias à API e viabilizar leitura rápida/offline.
-2. **Favoritos do usuário**: Permitir que o usuário marque filmes como favoritos para acesso permanente.
-
-### O Problema do `@Upsert` ou `OnConflictStrategy.REPLACE`
-Ao buscar dados atualizados da API OMDb, recebemos um JSON contendo os metadados do filme, porém a API não sabe nada sobre os favoritos locais do usuário.
-- Se usássemos um `@Upsert` padrão do Room ou `@Insert(onConflict = OnConflictStrategy.REPLACE)`, a linha inteira seria substituída, **apagando o status de `isFavorite`** e revertendo-o para `false`.
+Este documento descreve detalhadamente o funcionamento da camada de persistência com o **Room (SQLite)**, a premissa de arquitetura **Offline-First Progressiva** e a gestão das avaliações do usuário (*1 a 5 estrelas e comentários*).
 
 ---
 
-## 2. A Solução: Upsert Inteligente via SQLite
+## 1. O Paradigma Offline-First
 
-Para solucionar esse problema no nível do banco de dados com máxima performance, foi criada uma query customizada no [`MovieDao`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieDao.kt) utilizando a cláusula `ON CONFLICT(id) DO UPDATE SET`:
+Diferente de modelos de cache efêmeros ou transitórios (como prazos de 24 horas), o **CineApp UERN** adota uma filosofia **Offline-First**:
+1. **O SQLite (Room) é a Fonte Única da Verdade (Single Source of Truth)**.
+2. **Armazenamento Progressivo**: Conforme o usuário utiliza o aplicativo, pesquisa títulos, visualiza detalhes e marca favoritos, o banco de dados SQLite vai progressivamente acumulando e salvando esses dados de forma **permanente**.
+3. **Acesso Offline Imediato**: Se o filme já tiver sido visualizado ou salvo anteriormente, seus dados (sinopse, ano, nota, avaliações) são carregados instantaneamente do SQLite local, sem depender de conexão com a internet.
+4. **Resiliência e Continuidade**: O usuário pode continuar explorando os filmes já visitados, gerenciando favoritos e consultando suas próprias avaliações mesmo em modo avião ou sem conectividade.
 
+---
+
+## 2. Tabelas do Banco de Dados ([`AppDatabase`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/AppDatabase.kt))
+
+O banco de dados SQLite é versionado e gerencia duas entidades principais:
+
+```
+┌───────────────────────────────────────┐       ┌───────────────────────────────────────┐
+│                movies                 │       │             movie_reviews             │
+├───────────────────────────────────────┤       ├───────────────────────────────────────┤
+│ id (PK, String)                       │       │ movieId (PK, String)                  │
+│ title (String)                        │       │ movieTitle (String)                   │
+│ year (String)                         │       │ moviePosterUrl (String)               │
+│ genre (String)                        │       │ movieYear (String)                    │
+│ plot (String)                         │       │ rating (Int: 1 a 5 estrelas)          │
+│ rating (String, IMDb)                 │       │ comment (String)                      │
+│ posterUrl (String)                    │       │ timestamp (Long)                      │
+│ isFavorite (Boolean)                  │       └───────────────────────────────────────┘
+│ lastUpdatedTimestamp (Long)           │
+└───────────────────────────────────────┘
+```
+
+---
+
+## 3. Entidade de Filmes ([`MovieEntity`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieEntity.kt))
+
+```kotlin
+@Entity(tableName = "movies")
+data class MovieEntity(
+    @PrimaryKey
+    val id: String,                         // imdbID único (ex: "tt0111161")
+    val title: String,                      // Título do filme
+    val year: String,                       // Ano de lançamento
+    val genre: String,                      // Gêneros (ex: "Action, Crime, Drama")
+    val plot: String,                       // Sinopse completa
+    val rating: String,                     // Nota no IMDb (ex: "9.3")
+    val posterUrl: String,                  // URL do pôster (normalizada para HTTPS)
+    val isFavorite: Boolean = false,        // Flag de favorito controlada pelo usuário
+    val lastUpdatedTimestamp: Long = System.currentTimeMillis()
+)
+```
+
+### Upsert Inteligente via SQLite
+Ao sincronizar dados da OMDb API com o banco local, a query customizada no [`MovieDao`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieDao.kt) utiliza a cláusula atômica `ON CONFLICT(id) DO UPDATE SET`:
 ```sql
 INSERT INTO movies (
     id, title, year, genre, plot, rating, posterUrl, isFavorite, lastUpdatedTimestamp
@@ -36,94 +72,59 @@ ON CONFLICT(id) DO UPDATE SET
     posterUrl = excluded.posterUrl,
     lastUpdatedTimestamp = excluded.lastUpdatedTimestamp;
 ```
-
-### Por que essa query é eficiente?
-- **Execução atômica no SQLite**: Ocorre em uma única operação interna de banco, sem necessidade de múltiplas leituras e escritas lentas.
-- **Isolamento da coluna `isFavorite`**: Como a coluna `isFavorite` foi intencionalmente deixada de fora do bloco `DO UPDATE SET`, o SQLite preserva rigorosamente o valor que já estava gravado no banco para aquele filme caso ele já exista.
-- **Inserção limpa para novos registros**: Se o filme for novo, ele é inserido com o `isFavorite = false` inicial padrão.
+Essa estratégia preserva intacto o status de `isFavorite` mesmo quando novos dados chegam da API externa.
 
 ---
 
-## 3. Modelo da Entidade ([`MovieEntity`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieEntity.kt))
+## 4. Entidade de Avaliações ([`MovieReviewEntity`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieReviewEntity.kt))
+
+Permite que o usuário registre sua nota pessoal e escreva comentários sobre qualquer filme:
 
 ```kotlin
-@Entity(tableName = "movies")
-data class MovieEntity(
+@Entity(tableName = "movie_reviews")
+data class MovieReviewEntity(
     @PrimaryKey
-    val id: String,                         // imdbID único (ex: "tt0372784")
-    val title: String,                      // Título do filme
-    val year: String,                       // Ano de lançamento
-    val genre: String,                      // Gêneros (ex: "Action, Crime, Drama")
-    val plot: String,                       // Sinopse completa
-    val rating: String,                     // Nota no IMDb (ex: "8.2")
-    val posterUrl: String,                  // URL da imagem no CDN da Amazon
-    val isFavorite: Boolean = false,        // Flag controlada pelo usuário
-    val lastUpdatedTimestamp: Long = System.currentTimeMillis() // Momento do último cache
+    val movieId: String,             // ID único no IMDb
+    val movieTitle: String,          // Título do filme
+    val moviePosterUrl: String,      // Pôster em cache
+    val movieYear: String,           // Ano de lançamento
+    val rating: Int,                 // Avaliação do usuário (1 a 5 estrelas)
+    val comment: String,             // Comentário ou resenha escrita
+    val timestamp: Long = System.currentTimeMillis() // Momento da avaliação
 )
 ```
 
+### Operações no [`MovieReviewDao`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/local/MovieReviewDao.kt):
+- `getAllReviews()`: Emite um `Flow<List<MovieReviewEntity>>` ordenado cronologicamente para alimentar a tela **Minhas Avaliações**.
+- `getReviewByMovieId(movieId)`: Emite a avaliação específica para a tela de **Detalhes**.
+- `insertOrUpdateReview(review)`: Insere ou atualiza atomicamente com `OnConflictStrategy.REPLACE`.
+- `deleteReview(movieId)`: Permite que o usuário remova sua avaliação a qualquer momento.
+
 ---
 
-## 4. Política do Cache de 24 Horas (1 Dia)
+## 5. Fluxo de Tomada de Decisão Offline-First
 
-Implementada no método `getMovieDetails(id)` do [`MovieRepository`](file:///C:/Users/Madson%20Gustavo/AndroidStudioProjects/appmoviesunidade3uern/app/src/main/java/com/example/app_movies_unidade_3_uern/data/repository/MovieRepository.kt):
-
-```kotlin
-val ONE_DAY_MILLIS = 24 * 60 * 60 * 1000L // 86.400.000 ms
-
-val cachedMovie = movieDao.getMovieById(id)
-val currentTime = System.currentTimeMillis()
-
-val isCacheValid = cachedMovie != null &&
-        cachedMovie.plot.isNotBlank() &&
-        (currentTime - cachedMovie.lastUpdatedTimestamp) < ONE_DAY_MILLIS
-```
-
-### Critérios de Validação:
-1. **Existência**: O filme precisa existir no banco local.
-2. **Completude dos dados**: O campo `plot` (sinopse) deve estar preenchido (para garantir que não se trata apenas de um resumo vindo da listagem).
-3. **Janela temporal**: A diferença entre o timestamp atual do sistema e o `lastUpdatedTimestamp` deve ser estritamente inferior a 24 horas (`86.400.000 ms`).
-
-### Fluxo de Tomada de Decisão:
 ```mermaid
 flowchart TD
-    Start([Início: Requisição de Detalhes]) --> CheckDB[Consulta banco local pelo id]
-    CheckDB --> Exists{Filme existe no banco?}
+    Start([Início: Requisição de Detalhes]) --> CheckDB[Consulta SQLite pelo id]
+    CheckDB --> Exists{Filme já está no SQLite com sinopse?}
     
-    Exists -- Não --> FetchAPI[Chama OMDb API via Retrofit]
-    Exists -- Sim --> CheckTime{Idade do cache < 24h e sinopse preenchida?}
+    Exists -- Sim [Cache Hit Permanente] --> ReturnLocal[Retorna dados locais instantaneamente do SQLite]
+    Exists -- Não [Primeiro Acesso] --> FetchAPI[Chama OMDb API via Retrofit]
     
-    CheckTime -- Sim [Cache Hit] --> ReturnLocal[Retorna dados locais instantaneamente]
-    CheckTime -- Não [Cache Miss] --> FetchAPI
+    FetchAPI --> NetworkOK{Conexão bem-sucedida?}
+    NetworkOK -- Sim --> UpsertDB[Armazena permanentemente no SQLite preservando favoritos]
+    UpsertDB --> ReturnUpdated[Retorna dados ao ViewModel]
     
-    FetchAPI --> NetworkOK{Requisição bem-sucedida?}
-    NetworkOK -- Sim --> UpsertDB[Atualiza timestamp e faz Upsert preservando isFavorite]
-    UpsertDB --> ReturnUpdated[Retorna dados atualizados]
-    
-    NetworkOK -- Não --> Fallback{Existe cache antigo no banco?}
-    Fallback -- Sim --> ReturnFallback[Retorna cache expirado como Fallback Offline]
-    Fallback -- Não --> ThrowError[Emite UiState.Error para a tela]
+    NetworkOK -- Não [Offline] --> Fallback{Existe dado preliminar no SQLite?}
+    Fallback -- Sim --> ReturnFallback[Retorna dados do SQLite como Fallback]
+    Fallback -- Não --> ThrowError[Emite UiState.Error: 'Sem conexão']
 ```
 
 ---
 
-## 5. Resiliência Offline (Graceful Degradation)
+## 6. Reatividade em Tempo Real com `Flow`
 
-Um padrão sênior implementado no repositório é o **fallback gracioso**:
-Caso o usuário tente abrir os detalhes de um filme com mais de 24 horas de cache, mas esteja em um túnel, sem sinal ou com modo avião ativado:
-1. A chamada Retrofit falha lançando uma exceção de rede (`IOException`).
-2. O repositório captura a falha e verifica se há qualquer versão anterior salva no SQLite.
-3. Se houver, ele retorna essa versão em vez de mostrar uma tela de erro em branco, garantindo que o usuário nunca fique desamparado.
-
----
-
-## 6. Reatividade Automática com `Flow`
-
-Para os filmes favoritos, o método no DAO retorna um fluxo reativo:
-```kotlin
-@Query("SELECT * FROM movies WHERE isFavorite = 1 ORDER BY title ASC")
-fun getFavoriteMovies(): Flow<List<MovieEntity>>
-```
-- O Room monitora a tabela `movies` em segundo plano.
-- Sempre que qualquer registro for alterado (por exemplo, quando o usuário clica no coração na tela de detalhes), o Room emite automaticamente a lista atualizada de favoritos para o `FavoritesViewModel`.
-- A tela de favoritos é recomposta imediatamente, sem requisições manuais de recarga.
+Tanto os **Favoritos** quanto as **Avaliações** utilizam fluxos reativos do Room:
+- Qualquer inserção, atualização ou exclusão (`insertOrUpdateReview`, `deleteReview`, `updateFavoriteStatus`) notifica automaticamente os ViewModels (`FavoritesViewModel`, `ReviewsViewModel`, `DetailsViewModel`).
+- A interface Jetpack Compose é recomposta de forma fluida e instantânea sem necessidade de recarregar a tela manualmente.
